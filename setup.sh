@@ -209,7 +209,7 @@ create_sandbox() {
 # ─── Show usage ───────────────────────────────────────────────────────────────
 show_usage() {
   cat >&2 << 'EOF'
-Usage: setup.sh <command> [args...]
+Usage: dockcode <command> [args...]
 
 Commands:
   config show                          Print config file paths
@@ -241,7 +241,7 @@ handle_config_update() {
   local value="${2:-}"
 
   if [ -z "$key" ] || [ -z "$value" ]; then
-    error "Usage: setup.sh config update <key> <value>"
+    error "Usage: dockcode config update <key> <value>"
     exit 1
   fi
 
