@@ -48,7 +48,7 @@ AUTH_CONFIG="$(get_config AUTH_CONFIG "${DEFAULT_AUTH_CONFIG}")"
 
 # ─── Helpers ──────────────────────────────────────────────────────────────────
 info() { echo "INFO: $*"; }
-warn() { echo "WARNING: $*"; }
+warn() { echo "WARNING: $*" >&2; }
 error() { echo "ERROR: $*" >&2; }
 
 prompt_choice() {
@@ -56,11 +56,11 @@ prompt_choice() {
 	shift
 	local choice
 	while true; do
-		echo ""
-		echo "${prompt}"
+		echo "" >&2
+		echo "${prompt}" >&2
 		local i=1
 		for opt in "$@"; do
-			echo "  ${i}) ${opt}"
+			echo "  ${i}) ${opt}" >&2
 			((i++))
 		done
 		printf "\nChoice [1-%d]: " $# >&2
@@ -84,44 +84,55 @@ resolve_config() {
 
 	mkdir -p "$(dirname "${target}")"
 	local choice
-	choice=$(prompt_choice \
-		"No ${label} found at ${target}. Which would you like to use?" \
-		"Use project default (${filename})" \
-		"Copy from host (${host_path})" \
-		"Specify a custom path")
 
 	while true; do
+		choice=$(prompt_choice \
+			"No ${label} found at ${target}. Which would you like to use?" \
+			"Copy project default (${filename})" \
+			"Use host config (${host_path})" \
+			"Copy host config to $(dirname "${target}") (${host_path})" \
+			"Specify a custom path to use")
 		case "${choice}" in
 		1)
-			if [[ -f ${default} ]]; then
-				cp "${default}" "${target}"
-			else
-				error "No project default found."
-				exit 1
+			if [[ ! -f ${default} ]]; then
+				error "Project default not found."
+				continue 2
 			fi
+			cp "${default}" "${target}"
+			echo ""
+			read -n 1 -s -r -p "Project default has been copied. " \
+				"You may need to edit its content before continuing with launch. " \
+				"Please do so now. " \
+				"Press any key to continue..."
 			;;
 		2)
-			if [[ -f ${host_path} ]]; then
-				cp "${host_path}" "${target}"
-			else
+			if [[ ! -f ${host_path} ]]; then
 				error "Host file not found: ${host_path}"
-				continue
+				continue 2
 			fi
+			handle_config_update "${label}" "${host_path}"
 			;;
 		3)
+			if [[ ! -f ${host_path} ]]; then
+				error "Host file not found: ${host_path}"
+				continue 2
+			fi
+			cp "${host_path}" "${target}"
+			;;
+		4)
 			local custom_path
 			printf "Enter path: "
 			read -r custom_path
 			custom_path="${custom_path/#\~/${HOME}}"
-			if [[ ! -f ${custom_path} ]]; then
+			if [[ -f ${custom_path} ]]; then
 				error "File not found: ${custom_path}"
-				continue
+				continue 2
 			fi
-			cp "${custom_path}" "${target}"
+			handle_config_update "${label}" "${custom_path}"
 			;;
 		*)
 			error "invalid selection"
-			continue
+			continue 2
 			;;
 		esac
 		break
@@ -132,9 +143,9 @@ resolve_config() {
 # ─── Build image ──────────────────────────────────────────────────────────────
 build_image() {
 	info "Building custom sandbox image..."
-	local build_ctx
+	local build_ctx=""
 	build_ctx=$(mktemp -d)
-	trap 'rm -rf "$build_ctx"' RETURN
+	trap 'rm -rf "${build_ctx}"' EXIT
 	cp "${OPENCODE_CONFIG}" "${build_ctx}/opencode.json"
 	cp "${SCRIPT_DIR}/Dockerfile" "${build_ctx}/Dockerfile"
 	docker build -t "${TEMPLATE}" "${build_ctx}"
@@ -174,9 +185,8 @@ create_sandbox() {
 
 	info "Injecting auth.json..."
 	if grep -q "CHANGE-ME" "${AUTH_CONFIG}" 2>/dev/null; then
-		error "auth.json still contains placeholder API key (CHANGE-ME)."
-		error "Edit ${AUTH_CONFIG} to set your OpenRouter API key."
-		exit 1
+		warn "auth.json still contains placeholder API key (CHANGE-ME)."
+		warn "Edit ${AUTH_CONFIG} to set your OpenRouter API key."
 	fi
 	inject_auth "${AUTH_CONFIG}" "${name}"
 
@@ -257,11 +267,19 @@ handle_launch() {
 	while [[ $# -gt 0 ]]; do
 		case "$1" in
 		-n)
-			name="$2"
+			name="${2:-}" # Safely read with a fallback
+			if [[ -z "${name}" ]]; then
+				error "Flag -n requires a value."
+				exit 1
+			fi
 			shift 2
 			;;
 		-w)
-			workspace="$2"
+			workspace="${2:-}"
+			if [[ -z "${workspace}" ]]; then
+				error "Flag -w requires a value."
+				exit 1
+			fi
 			shift 2
 			;;
 		*)
@@ -286,7 +304,7 @@ handle_launch() {
 	local existing
 	if command -v jq >/dev/null 2>&1; then
 		existing=$(docker sandbox ls --json 2>/dev/null |
-			jq -e --arg n "${name}" '.[] | select(.name == $n)' 2>/dev/null || true)
+			jq -e --arg n "${name}" 'any(.vms[]; .name == $n)' 2>/dev/null || true)
 	else
 		existing=$(docker sandbox ls --json 2>/dev/null |
 			grep -o "\"name\": *\"${name}\"" || true)
@@ -304,9 +322,8 @@ handle_launch() {
 		"auth.json" "auth.example.json" "${HOME}/.local/share/opencode/auth.json"
 
 	create_sandbox "${name}" "${workspace}"
-	echo ""
-	echo "Connect with:"
-	echo "  docker sandbox run ${name}"
+	read -n 1 -s -r -p "Press any key to launch OpenCode sandbox..."
+	docker sandbox run "${name}"
 }
 
 # ═══════════════════════════════════════════════════════════════════════════════
