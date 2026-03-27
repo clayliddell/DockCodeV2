@@ -296,25 +296,32 @@ handle_settings_update() {
 		"Manually edit (host editor)" \
 		"Re-import default config from host")
 
-	case "${choice}" in
-	1)
-		local tmpfile
-		tmpfile=$(mktemp /tmp/dockcode-opencode-XXXXXX.json)
-		docker sandbox exec "${name}" cat /home/agent/.config/opencode/opencode.json >"${tmpfile}"
-		"${EDITOR:-vi}" "${tmpfile}"
-		docker sandbox exec -i "${name}" bash -c "cat > /home/agent/.config/opencode/opencode.json" <"${tmpfile}"
-		rm -f "${tmpfile}"
-		info "Config updated"
-		;;
-	2)
-		if [[ ! -f ${OPENCODE_CONFIG} ]]; then
-			error "Default config not found at ${OPENCODE_CONFIG}"
-			exit 1
-		fi
-		docker sandbox exec -i "${name}" bash -c "cat > /home/agent/.config/opencode/opencode.json" <"${OPENCODE_CONFIG}"
-		info "Config updated from ${OPENCODE_CONFIG}"
-		;;
-	esac
+	while true; do
+		case "${choice}" in
+		1)
+			local tmpfile
+			tmpfile=$(mktemp /tmp/dockcode-opencode-XXXXXX.json)
+			docker sandbox exec "${name}" cat /home/agent/.config/opencode/opencode.json >"${tmpfile}"
+			"${EDITOR:-vi}" "${tmpfile}"
+			docker sandbox exec -i "${name}" bash -c "cat > /home/agent/.config/opencode/opencode.json" <"${tmpfile}"
+			rm -f "${tmpfile}"
+			info "Config updated"
+			;;
+		2)
+			if [[ ! -f ${OPENCODE_CONFIG} ]]; then
+				error "Default config not found at ${OPENCODE_CONFIG}"
+				exit 1
+			fi
+			docker sandbox exec -i "${name}" bash -c "cat > /home/agent/.config/opencode/opencode.json" <"${OPENCODE_CONFIG}"
+			info "Config updated from ${OPENCODE_CONFIG}"
+			;;
+		*)
+			error "Invalid option"
+			continue
+			;;
+		esac
+		break
+	done
 }
 
 # ─── Show usage ───────────────────────────────────────────────────────────────
@@ -606,16 +613,30 @@ case "${1-}" in
 	;;
 config)
 	case "${2-}" in
-	show) handle_config_show ;;
-	update) handle_config_update "${3-}" "${4-}" ;;
-	*) show_usage ;;
+	show)
+		handle_config_show
+		;;
+	update)
+		handle_config_update "${3-}" "${4-}"
+		;;
+	*)
+		show_usage
+		;;
 	esac
 	;;
 settings)
 	case "${2-}" in
-	print) shift 2; handle_settings_print "$@" ;;
-	update) shift 2; handle_settings_update "$@" ;;
-	*) show_usage ;;
+	print)
+		shift 2
+		handle_settings_print "$@"
+		;;
+	update)
+		shift 2
+		handle_settings_update "$@"
+		;;
+	*)
+		show_usage
+		;;
 	esac
 	;;
 ls)
