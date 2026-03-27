@@ -1,0 +1,88 @@
+#!/usr/bin/env bash
+# mock_docker — PATH-based docker mock for BATS tests
+# Logs every call to $MOCK_CALLS and returns configurable responses
+# from $MOCK_RESPONSES_DIR/<subcommand> response files.
+
+set -euo pipefail
+
+MOCK_CALLS="${MOCK_CALLS:-/tmp/mock_calls}"
+MOCK_RESPONSES_DIR="${MOCK_RESPONSES_DIR:-/tmp/mock_responses}"
+MOCK_EXIT_CODE="${MOCK_EXIT_CODE:-0}"
+
+# Log the call
+echo "docker $*" >>"${MOCK_CALLS}"
+
+# Build a lookup key from the subcommand arguments
+# e.g. "docker sandbox ls --json" → key "sandbox_ls_json"
+#      "docker context use desktop-linux" → key "context_use_desktop-linux"
+#      "docker build" → key "build"
+key=""
+for arg in "$@"; do
+	case "${arg}" in
+	--*)
+		# Strip leading dashes for the key
+		clean="${arg#--}"
+		clean="${clean//-/_}"
+		if [[ -z "${key}" ]]; then
+			key="${clean}"
+		else
+			key="${key}_${clean}"
+		fi
+		;;
+	-*)
+		# Single-dash flags
+		clean="${arg#-}"
+		if [[ -z "${key}" ]]; then
+			key="${clean}"
+		else
+			key="${key}_${clean}"
+		fi
+		;;
+	*)
+		if [[ -z "${key}" ]]; then
+			key="${arg}"
+		else
+			key="${key}_${arg}"
+		fi
+		;;
+	esac
+done
+
+# Try exact match first, then fall back to progressively shorter prefixes
+response_file=""
+IFS='/' read -ra key_parts <<<"${key}"
+search_key="${key}"
+while [[ -n "${search_key}" ]]; do
+	if [[ -f "${MOCK_RESPONSES_DIR}/${search_key}" ]]; then
+		response_file="${MOCK_RESPONSES_DIR}/${search_key}"
+		break
+	fi
+	# Try removing the last segment
+	search_key="${search_key%_*}"
+done
+
+# Also try matching on just the first two path components
+if [[ -z "${response_file}" ]]; then
+	IFS='/' read -ra parts <<<"${key}"
+	if [[ ${#parts[@]} -ge 2 ]]; then
+		short_key="${parts[0]}_${parts[1]}"
+		if [[ -f "${MOCK_RESPONSES_DIR}/${short_key}" ]]; then
+			response_file="${MOCK_RESPONSES_DIR}/${short_key}"
+		fi
+	fi
+fi
+
+if [[ -n "${response_file}" ]]; then
+	# Response file format: first line is exit code (optional), rest is stdout
+	first_line=$(head -1 "${response_file}" || true)
+	if [[ "${first_line}" =~ ^exit:([0-9]+)$ ]]; then
+		exit_code="${BASH_REMATCH[1]}"
+		tail -n +2 "${response_file}"
+	else
+		exit_code=0
+		cat "${response_file}"
+	fi
+	exit "${exit_code}"
+fi
+
+exit "${MOCK_EXIT_CODE}"

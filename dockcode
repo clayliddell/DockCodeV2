@@ -5,9 +5,9 @@ set -euo pipefail
 IMAGE_NAME="opencode-openrouter"
 IMAGE_TAG="v1"
 TEMPLATE="${IMAGE_NAME}:${IMAGE_TAG}"
-DOCKCODE_CONFIG_DIR="${HOME}/.config/dockcode"
+DOCKCODE_CONFIG_DIR="${DOCKCODE_CONFIG_DIR:-${HOME}/.config/dockcode}"
 CONFIG_FILE="${DOCKCODE_CONFIG_DIR}/config"
-SCRIPT_DIR="$(dirname "$(realpath "${BASH_SOURCE[0]}")")"
+SCRIPT_DIR="${SCRIPT_DIR:-$(dirname "$(realpath "${BASH_SOURCE[0]}")")}"
 
 DEFAULT_OPENCODE_CONFIG="${DOCKCODE_CONFIG_DIR}/opencode.json"
 DEFAULT_AUTH_CONFIG="${DOCKCODE_CONFIG_DIR}/auth.json"
@@ -41,10 +41,12 @@ init_config() {
 	fi
 }
 
-# ─── Initialize config and resolve values ─────────────────────────────────────
-init_config
-OPENCODE_CONFIG="$(get_config OPENCODE_CONFIG "${DEFAULT_OPENCODE_CONFIG}")"
-AUTH_CONFIG="$(get_config AUTH_CONFIG "${DEFAULT_AUTH_CONFIG}")"
+# ─── Load config values ────────────────────────────────────────────────────────
+load_config() {
+	init_config
+	OPENCODE_CONFIG="$(get_config OPENCODE_CONFIG "${DEFAULT_OPENCODE_CONFIG}")"
+	AUTH_CONFIG="$(get_config AUTH_CONFIG "${DEFAULT_AUTH_CONFIG}")"
+}
 
 # ─── Helpers ──────────────────────────────────────────────────────────────────
 info() { echo "INFO: $*"; }
@@ -116,10 +118,7 @@ resolve_config() {
 			fi
 			cp "${default}" "${target}"
 			echo ""
-			read -n 1 -s -r -p "Project default has been copied. " \
-				"You may need to edit its content before continuing with launch. " \
-				"Please do so now. " \
-				"Press any key to continue..."
+			read -n 1 -s -r -p "Project default has been copied. You may need to edit its content before continuing with launch. Please do so now. Press any key to continue..."
 			;;
 		2)
 			if [[ ! -f ${host_path} ]]; then
@@ -134,6 +133,7 @@ resolve_config() {
 				continue 2
 			fi
 			cp "${host_path}" "${target}"
+			info "Copied ${label} to ${target}"
 			;;
 		4)
 			local custom_path
@@ -153,7 +153,6 @@ resolve_config() {
 		esac
 		break
 	done
-	info "Copied ${label} to ${target}"
 }
 
 # ─── Build image ──────────────────────────────────────────────────────────────
@@ -161,6 +160,7 @@ build_image() {
 	info "Building custom sandbox image..."
 	local build_ctx=""
 	build_ctx=$(mktemp -d)
+	# shellcheck disable=SC2064
 	trap "rm -rf \"${build_ctx}\"" EXIT
 	cp "${OPENCODE_CONFIG}" "${build_ctx}/opencode.json"
 	cp "${SCRIPT_DIR}/Dockerfile" "${build_ctx}/Dockerfile"
@@ -579,13 +579,7 @@ handle_launch() {
 
 	# Check if sandbox already exists
 	local existing
-	if command -v jq >/dev/null 2>&1; then
-		existing=$(docker sandbox ls --json 2>/dev/null |
-			jq -e --arg n "${name}" 'any(.vms[]; .name == $n)' 2>/dev/null || true)
-	else
-		existing=$(docker sandbox ls --json 2>/dev/null |
-			grep -o "\"name\": *\"${name}\"" || true)
-	fi
+	existing=$(get_sandbox_names | grep -Fx "${name}" || true)
 	if [[ -n ${existing} ]]; then
 		info "Launching existing sandbox '${name}'..."
 		docker sandbox run "${name}"
@@ -607,54 +601,63 @@ handle_launch() {
 # COMMAND DISPATCH
 # ═══════════════════════════════════════════════════════════════════════════════
 
-case "${1-}" in
--h | --help)
-	show_usage
-	;;
---version)
-	echo "dockcode v2alpha"
-	;;
-config)
-	case "${2-}" in
-	show)
-		handle_config_show
+main() {
+	load_config
+
+	case "${1-}" in
+	-h | --help)
+		show_usage
 		;;
-	update)
-		handle_config_update "${3-}" "${4-}"
+	--version)
+		echo "dockcode v2alpha"
+		;;
+	config)
+		case "${2-}" in
+		show)
+			handle_config_show
+			;;
+		update)
+			handle_config_update "${3-}" "${4-}"
+			;;
+		*)
+			show_usage
+			;;
+		esac
+		;;
+	settings)
+		case "${2-}" in
+		print)
+			shift 2
+			handle_settings_print "$@"
+			;;
+		update)
+			shift 2
+			handle_settings_update "$@"
+			;;
+		*)
+			show_usage
+			;;
+		esac
+		;;
+	ls)
+		shift
+		handle_ls "$@"
+		;;
+	rm)
+		shift
+		handle_destroy "$@"
+		;;
+	launch)
+		shift
+		handle_launch "$@"
 		;;
 	*)
 		show_usage
 		;;
 	esac
-	;;
-settings)
-	case "${2-}" in
-	print)
-		shift 2
-		handle_settings_print "$@"
-		;;
-	update)
-		shift 2
-		handle_settings_update "$@"
-		;;
-	*)
-		show_usage
-		;;
-	esac
-	;;
-ls)
-	shift
-	handle_ls "$@"
-	;;
-rm)
-	shift
-	handle_destroy "$@"
-	;;
-launch)
-	shift
-	handle_launch "$@"
-	;;
-*)
-	show_usage
-	;;
-esac
+}
+
+# Only run main when executed directly (not when sourced)
+if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
+	main "$@"
+fi
