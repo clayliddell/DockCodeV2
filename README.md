@@ -90,14 +90,6 @@ dockcode config update opencode.json ~/my-opencode.json
 dockcode config update auth.json ~/my-auth.json
 ```
 
-### First-run behavior
-
-The `launch` command is non-interactive. On first run:
-
-1. If `~/.config/dockcode/opencode.json` doesn't exist, the project default is copied
-2. If `~/.config/dockcode/auth.json` doesn't exist, the project default is copied
-3. Edit `~/.config/dockcode/auth.json` to set your API key before launching
-
 ## Launch Command
 
 ```bash
@@ -120,7 +112,7 @@ If a sandbox with the given name already exists, it is launched directly. Otherw
 |---|---|
 | `Dockerfile` | Extends `docker/sandbox-templates:opencode` with OpenCode config |
 | `opencode.json` | Default OpenCode config (OpenRouter models, permissions) |
-| `auth.json` | Default auth template (edit to set your API key) |
+| `auth.example.json` | Default auth template (copy and edit to set your API key) |
 | `dockcode` | CLI with config management and sandbox launch |
 
 ## Configuration
@@ -135,7 +127,7 @@ All permissions are set to "allow" by default since OpenCode is run in a VM. You
 
 ### API key
 
-After first running the script once, a default `~/.config/dockcode/auth.json` should be created. You can point the script config to a different location. Or, you can edit `~/.config/dockcode/auth.json` to set your OpenRouter API key:
+After first running the script once, a default `~/.config/dockcode/auth.json` should be created from the bundled `auth.example.json` template. You can point the script config to a different location. Or, you can edit `~/.config/dockcode/auth.json` to set your OpenRouter API key:
 
 ```json
 {
